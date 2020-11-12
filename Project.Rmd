@@ -1,0 +1,442 @@
+---
+title: "Project"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+## Read Data
+```{r}
+set.seed(1)
+TD = read.csv("train_data.csv")
+
+#Split training data into 80-20 train/validation split.
+train_ind = sample(length(TD$Status), 0.70*length(TD$Status))
+train = TD[train_ind,]
+valid = TD[-train_ind,]
+test = read.csv("test_data.csv")
+```
+
+## Test With Best Model
+```{r}
+arr = c(4,1,5,1,5)
+lda.fit = suppressWarnings(  lda(factor(Status) ~  poly(smoking,arr[1],raw=T) + poly(cholesterol,arr[2],raw=T) + poly(behavior,arr[3],raw=T) +  poly(age,arr[4],raw=T) + poly(assay,arr[5],raw=T), data=train) )
+lda.pred = predict(lda.fit, test)$class
+IDs = 1001:(1001+length(test$BP)-1)
+results = ifelse(lda.pred==1,TRUE,FALSE)
+toExport = data.frame("ID"=IDs,"Category"=results)
+write.csv(toExport,file="testPredictions.csv",row.names=FALSE)
+```
+
+
+## Best Subset
+```{r}
+library(leaps)
+subset.fit = regsubsets(Status~.,data=train,nvmax=length(train))
+subset.sum = summary(subset.fit)
+subset.sum
+par(mfrow=c(2,2)) 
+plot(subset.sum$rss, xlab="Num of Vars", ylab="RSS", type="l")
+points(which.min(subset.sum$rss), subset.sum$rss[which.min(subset.sum$rss)], col="red",cex=2,pch=20)
+plot(subset.sum$adjr2, xlab="Num of Vars", ylab="Adjusted RSq", type="l") 
+points(which.max(subset.sum$adjr2), subset.sum$adjr2[which.max (subset.sum$adjr2)], col="red",cex=2,pch=20) 
+plot(subset.sum$cp, xlab ="Num of Vars",ylab="Cp",type="l") 
+points (which.min(subset.sum$cp), subset.sum$cp[which.min (subset.sum$cp)], col="red",cex=2,pch=20) 
+plot(subset.sum$bic, xlab="Num of Vars",ylab="BIC", type="l") 
+points (which.min(subset.sum$bic), subset.sum$bic[which.min(subset.sum$bic)],col="red",cex=2,pch=20)
+```
+
+Which predictors to use according to Adjusted RSq
+```{r}
+subset.coeff = coef(subset.fit, which.max(subset.sum$adjr2))
+```
+
+## LogRed/LDA/QDA for Best Subset
+
+Perform LogReg with chosen predictors
+```{r}
+bestVal = 0
+for (x in 1:500) {
+  arr = sample(1:5, 6, replace=TRUE)
+  glm.fit = suppressWarnings(  glm(factor(Status) ~  poly(smoking,arr[1],raw=T) + poly(cholesterol,arr[2],raw=T) + poly(behavior,arr[3],raw=T) +  poly(age,arr[4],raw=T) + poly(gold_standard,arr[5],raw=T) + poly(assay,arr[6],raw=T), data=train, family="binomial") )
+  glm.prob = predict(glm.fit, valid, type="response")
+  glm.pred=rep(0,length(valid$Status))
+  glm.pred[glm.prob>.5]=1
+  if (mean(glm.pred==valid$Status) > bestVal) {
+    glm.bestProb = glm.prob
+    bestArr = arr
+    bestVal = mean(glm.pred==valid$Status)
+  }
+}
+bestArr
+bestVal
+```
+
+ROC Curve with chosen predictors
+```{r}
+library(ROCR)
+pred = prediction(glm.bestProb, valid$Status)
+perf = performance(pred, "tpr", "fpr")
+plot(perf, main="ROC Curve")
+```
+
+Perform LDA with chosen predictors
+```{r}
+library(MASS)
+bestVal=0
+for (x in 1:500) {
+  arr = sample(1:5, 6, replace=TRUE)
+  lda.fit = suppressWarnings(  lda(factor(Status) ~  poly(smoking,arr[1],raw=T) + poly(cholesterol,arr[2],raw=T) + poly(behavior,arr[3],raw=T) +  poly(age,arr[4],raw=T) + poly(gold_standard,arr[5],raw=T) + poly(assay,arr[6],raw=T), data=train) )
+lda.pred = predict(lda.fit, valid)$class
+  if (mean(lda.pred==valid$Status) > bestVal) {
+    bestArr = arr
+    bestVal = mean(lda.pred==valid$Status)
+  }
+}
+bestArr
+bestVal
+```
+
+Perform QDA with chosen predictors
+```{r}
+bestVal = 0
+for (x in 1:500) {
+  arr = sample(1:5, 6, replace=TRUE)
+  qda.fit = suppressWarnings(  qda(factor(Status) ~  poly(smoking,arr[1],raw=T) + poly(cholesterol,arr[2],raw=T) + poly(behavior,arr[3],raw=T) +  poly(age,arr[4],raw=T) + poly(gold_standard,arr[5],raw=T) + poly(assay,arr[6],raw=T), data=train) )
+qda.pred = predict(qda.fit, valid)$class
+  if (mean(qda.pred==valid$Status) > bestVal) {
+    bestArr = arr
+    bestVal = mean(qda.pred==valid$Status)
+  }
+}
+bestArr
+bestVal
+```
+
+We see from LogReg summary some of the predictors are not significant. We now run a model without them.
+
+LogReg with less predictors
+```{r}
+bestVal = 0
+for (x in 1:500) {
+  arr = sample(1:5, 5, replace=TRUE)
+  glm.fit = suppressWarnings(  glm(factor(Status) ~  poly(smoking,arr[1],raw=T) + poly(cholesterol,arr[2],raw=T) + poly(behavior,arr[3],raw=T) +  poly(age,arr[4],raw=T) + poly(assay,arr[5],raw=T), data=train, family="binomial") )
+  glm.prob = predict(glm.fit, valid, type="response")
+  glm.pred=rep(0,length(valid$Status))
+  glm.pred[glm.prob>.5]=1
+  if (mean(glm.pred==valid$Status) > bestVal) {
+    glm.bestProb = glm.prob
+    bestArr = arr
+    bestVal = mean(glm.pred==valid$Status)
+  }
+}
+bestArr
+bestVal
+```
+
+ROC Curve with chosen predictors
+```{r}
+library(ROCR)
+pred = prediction(glm.prob, valid$Status)
+perf = performance(pred, "tpr", "fpr")
+plot(perf,main="ROC Curve")
+```
+
+LDA with less predictors
+```{r}
+bestVal=0
+for (x in 1:500) {
+  arr = sample(1:5, 5, replace=TRUE)
+  lda.fit = suppressWarnings(  lda(factor(Status) ~  poly(smoking,arr[1],raw=T) + poly(cholesterol,arr[2],raw=T) + poly(behavior,arr[3],raw=T) +  poly(age,arr[4],raw=T) + poly(assay,arr[5],raw=T), data=train) )
+lda.pred = predict(lda.fit, valid)$class
+  if (mean(lda.pred==valid$Status) > bestVal) {
+    bestArr = arr
+    bestVal = mean(lda.pred==valid$Status)
+  }
+}
+bestArr
+bestVal
+```
+
+QDA with less predictors
+```{r}
+bestVal = 0
+for (x in 1:500) {
+  arr = sample(1:5, 5, replace=TRUE)
+  qda.fit = suppressWarnings(  qda(factor(Status) ~  poly(smoking,arr[1],raw=T) + poly(cholesterol,arr[2],raw=T) + poly(behavior,arr[3],raw=T) +  poly(age,arr[4],raw=T) + poly(assay,arr[5],raw=T), data=train) )
+qda.pred = predict(qda.fit, valid)$class
+  if (mean(qda.pred==valid$Status) > bestVal) {
+    bestArr = arr
+    bestVal = mean(qda.pred==valid$Status)
+  }
+}
+bestArr
+bestVal
+```
+
+## LASSO
+Perform Lasso to see if coefficients approach zero
+```{r}
+library (glmnet)
+grid =10^seq(0,-4,length=100)
+X = model.matrix(train$Status ~ . -1, data=train)[,-11]
+Y = train$Status
+lasso.ck=glmnet(X,as.factor(Y),alpha=1,lambda=grid,family="binomial")
+plot(lasso.ck, xvar="lambda",main="Lasso Regression")
+```
+
+Perform Lasso CV to find best lambda
+```{r}
+set.seed(4)
+lasso.cv =cv.glmnet(X,as.factor(Y),alpha=1,lambda=grid,family="binomial")
+plot(lasso.cv, main="lambda CV")
+bestlam =lasso.cv$lambda.min
+```
+See which coefficients approach 0
+```{r}
+lasso.zr=glmnet(X,Y,alpha=1,lambda=grid)
+lasso.coef=predict(lasso.zr,type="coefficients",s=bestlam)[1:11,]
+lasso.coef
+```
+
+## LogRed/LDA/QDA for Lasso
+
+Perform LogReg with chosen predictors
+```{r}
+bestVal = 0
+for (x in 1:500) {
+  arr = sample(1:5, 7, replace=TRUE)
+  glm.fit = suppressWarnings(  glm(factor(Status) ~  poly(smoking,arr[1],raw=T) + poly(cholesterol,arr[2],raw=T) + poly(behavior,arr[3],raw=T) + poly(BMI,arr[4],raw=T) +  poly(age,arr[5],raw=T) + poly(gold_standard,arr[6],raw=T) + poly(assay,arr[7],raw=T), data=train, family="binomial") )
+  glm.prob = predict(glm.fit, valid, type="response")
+  glm.pred=rep(0,length(valid$Status))
+  glm.pred[glm.prob>.5]=1
+  if (mean(glm.pred==valid$Status) > bestVal) {
+    glm.bestProb = glm.prob
+    bestArr = arr
+    bestVal = mean(glm.pred==valid$Status)
+  }
+}
+bestArr
+bestVal
+```
+
+ROC Curve with chosen predictors
+```{r}
+library(ROCR)
+pred = prediction(glm.bestProb, valid$Status)
+perf = performance(pred, "tpr", "fpr")
+plot(perf, main="ROC Curve")
+```
+
+Perform LDA with chosen predictors
+```{r}
+bestVal=0
+for (x in 1:500) {
+  arr = sample(1:5, 7, replace=TRUE)
+  lda.fit = suppressWarnings(  lda(factor(Status) ~  poly(smoking,arr[1],raw=T) + poly(cholesterol,arr[2],raw=T) + poly(behavior,arr[3],raw=T) + poly(BMI,arr[4],raw=T) +  poly(age,arr[5],raw=T) + poly(gold_standard,arr[6],raw=T) + poly(assay,arr[7],raw=T), data=train) )
+lda.pred = predict(lda.fit, valid)$class
+  if (mean(lda.pred==valid$Status) > bestVal) {
+    bestArr = arr
+    bestVal = mean(lda.pred==valid$Status)
+  }
+}
+bestArr
+bestVal
+```
+
+Perform QDA with chosen predictors
+```{r}
+bestVal = 0
+for (x in 1:500) {
+  arr = sample(1:5, 7, replace=TRUE)
+  qda.fit = suppressWarnings(  qda(factor(Status) ~  poly(smoking,arr[1],raw=T) + poly(cholesterol,arr[2],raw=T) + poly(behavior,arr[3],raw=T) + poly(BMI,arr[4],raw=T) +  poly(age,arr[5],raw=T) + poly(gold_standard,arr[6],raw=T) + poly(assay,arr[7],raw=T), data=train) )
+qda.pred = predict(qda.fit, valid)$class
+  if (mean(qda.pred==valid$Status) > bestVal) {
+    bestArr = arr
+    bestVal = mean(qda.pred==valid$Status)
+  }
+}
+bestArr
+bestVal
+```
+
+We see from LogReg summary some of the predictors are not significant. We now run a model without them.
+
+LogReg with less predictors
+```{r}
+bestVal = 0
+for (x in 1:500) {
+  arr = sample(1:5, 4, replace=TRUE)
+  glm.fit = suppressWarnings(  glm(factor(Status) ~  poly(smoking,arr[1],raw=T) + poly(cholesterol,arr[2],raw=T) +   poly(age,arr[3],raw=T) + poly(assay,arr[4],raw=T), data=train, family="binomial") )
+  glm.prob = predict(glm.fit, valid, type="response")
+  glm.pred=rep(0,length(valid$Status))
+  glm.pred[glm.prob>.5]=1
+  if (mean(glm.pred==valid$Status) > bestVal) {
+    glm.bestProb = glm.prob
+    bestArr = arr
+    bestVal = mean(glm.pred==valid$Status)
+  }
+}
+bestArr
+bestVal
+```
+
+ROC Curve with chosen predictors
+```{r}
+library(ROCR)
+pred = prediction(glm.bestProb, valid$Status)
+perf = performance(pred, "tpr", "fpr")
+plot(perf,main="ROC Curve")
+```
+
+LDA with less predictors
+```{r}
+bestVal=0
+for (x in 1:500) {
+  arr = sample(1:5, 4, replace=TRUE)
+  lda.fit = suppressWarnings(  lda(factor(Status) ~  poly(smoking,arr[1],raw=T) + poly(cholesterol,arr[2],raw=T) +  poly(age,arr[3],raw=T) + poly(assay,arr[4],raw=T), data=train) )
+lda.pred = predict(lda.fit, valid)$class
+  if (mean(lda.pred==valid$Status) > bestVal) {
+    bestArr = arr
+    bestVal = mean(lda.pred==valid$Status)
+  }
+}
+bestArr
+bestVal
+```
+
+QDA with less predictors
+```{r}
+bestVal = 0
+for (x in 1:500) {
+  arr = sample(1:5, 4, replace=TRUE)
+  qda.fit = suppressWarnings( qda(factor(Status) ~  poly(smoking,arr[1],raw=T) + poly(cholesterol,arr[2],raw=T) +  poly(age,arr[3],raw=T) + poly(assay,arr[4],raw=T), data=train) )
+qda.pred = predict(qda.fit, valid)$class
+  if (mean(qda.pred==valid$Status) > bestVal) {
+    bestArr = arr
+    bestVal = mean(qda.pred==valid$Status)
+  }
+}
+bestArr
+bestVal
+```
+
+
+## GAMS
+
+Best so far uses: factor(Status) ~  smoking + cholesterol + age +  assay
+
+Various natural splines
+```{r}
+library(splines)
+set.seed(1)
+bestVal = 0
+for (x in 1:500) {
+  arr = sample(1:5, 4, replace=TRUE)
+  gam.val = glm(factor(Status)~ns(smoking,arr[1])+ns(cholesterol,arr[2])+ns(age,arr[3])+ns(assay,arr[4]),data=train, family="binomial")
+  gam.prob = predict(gam.val,valid)
+  gam.prob = exp(gam.prob) / ( 1 + exp(gam.prob))
+  gam.pred=rep(0,length(valid$Status))
+  gam.pred[gam.prob>0.5]=1
+  if (mean(gam.pred==valid$Status) > bestVal) {
+    bestArr = arr
+    bestVal = mean(gam.pred==valid$Status)
+  }
+}
+bestArr
+bestVal
+```
+
+Various smoothing splines
+```{r}
+library(gam)
+set.seed(1)
+bestVal = 0
+par(mfrow =c(4,5))
+for (x in 1:500) {
+  arr = sample(1:5, 4, replace=TRUE)
+  gam.val = gam(factor(Status)~s(smoking,arr[1])+s(cholesterol,arr[2])+s(age,arr[3])+s(assay,arr[4]),data=train, family="binomial")
+  gam.prob = predict(gam.val,valid)
+  gam.prob = exp(gam.prob) / ( 1 + exp(gam.prob))
+  gam.pred=rep(0,length(valid$Status))
+  gam.pred[gam.prob>0.5]=1
+  table(gam.pred,valid$Status)
+  if (mean(gam.pred==valid$Status) > bestVal) {
+    bestArr = arr
+    bestVal = mean(gam.pred==valid$Status)
+  }
+}
+bestArr
+bestVal
+```
+  
+  
+## TREE
+
+```{r}
+library(tree)
+set.seed(1)
+tree.info = tree(as.factor(Status)~.-Id,data=train)
+summary(tree.info)
+tree.prob=predict(tree.info,valid)
+tree.pred=rep(0,length(valid$Status))
+tree.pred[tree.prob[,2]>.5]=1
+table(tree.pred,valid$Status)
+mean(glm.pred==valid$Status)
+plot(tree.info, main="Decision Tree")
+text(tree.info,pretty=0,cex=0.4,col="Red")
+```
+
+Perform tree cross-validation
+```{r}
+tree.cv = cv.tree(tree.info,FUN=prune.misclass)
+plot(tree.cv$size, tree.cv$dev, xlab="Tree Size",ylab="Dev", type="b", main="Tree Cross-Validation")
+```
+
+## Linear SMV
+
+```{r}
+library(e1071)
+set.seed(1)
+costArr = seq(0.001,0.03,0.0001)
+tune.out=tune(svm,as.factor(Status)~.,data=train,kernel ="linear",
+ranges =list(cost=costArr))
+bestmod = tune.out$best.model
+tempData = valid
+tempData$Status = as.factor(tempData$Status)
+yhat = predict(bestmod,tempData)
+mean(yhat==valid$Status)
+bestmod
+```
+
+## Polynomial SMV
+```{r}
+set.seed(1)
+costArr = 10^seq(-2,2,0.3)
+tune.out=tune(svm,as.factor(Status)~.,data=train,kernel ="polynomial",
+ranges =list(cost=costArr, degree=seq(2:10)))
+bestmod = tune.out$best.model
+tempData = valid
+tempData$Status = as.factor(tempData$Status)
+yhat = predict(bestmod,tempData)
+mean(yhat==valid$Status)
+bestmod
+```
+
+## Radial SMV
+```{r}
+set.seed(1)
+costArr = 10^seq(-2,2,0.3)
+gammaArr = costArr
+tune.out=tune(svm,as.factor(Status)~.,data=train,kernel ="radial",
+ranges =list(cost=costArr, gamma=gammaArr))
+bestmod = tune.out$best.model
+tempData = valid
+tempData$Status = as.factor(tempData$Status)
+yhat = predict(bestmod,tempData)
+mean(yhat==valid$Status)
+bestmod
+```
